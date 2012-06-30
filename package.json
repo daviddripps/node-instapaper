@@ -1,0 +1,15 @@
+{
+  "name": "node-instapaper",
+  "version": "0.0.1",
+  "author": "David Dripps <david.dripps@adgentdigital.com>",
+  "private": false,
+  "keywords": ["Instapaper", "Read Later", "Bookmark"],
+  "engines": { "node": ">= 0.6.0" },
+  "dependencies": {
+    "oauth" : "0.9.x"
+  },
+  "devDependencies": {
+    "mocha"   : "1.x.x",
+    "should"  : "0.6.x"
+  }
+}
