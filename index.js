@@ -8,10 +8,14 @@
 
 //OAuth client
 var OAuth = require('oauth').OAuth;
+var querystring = require('qs');
 
 //constants
-API_VERSION = 1;
-ENDPOINT = {
+var API_VERSION = 1;
+var OAUTH_VERSION = '1.0a';
+var OAUTH_SIGNING_METHOD = 'HMAC-SHA1';
+var BASE_URL = 'https://www.instapaper.com/api/' + API_VERSION;
+var ENDPOINT = {
   oauth: {
     accessToken : '/oauth/access_token'
   },
@@ -42,21 +46,94 @@ ENDPOINT = {
  * @constructor
  */
 var Instapaper = function(consumerKey, consumerSecret, options) {
+  if(! consumerKey) throw new TypeError('You must provide a consumer key.');
   this.consumerKey = consumerKey;
+
+  if(! consumerSecret) throw new TypeError('You must provide a consumer secret.');
   this.consumerSecret = consumerSecret;
 
   //set the OAuth callback path if provided
   if(options && options.oauthCallbackPath) this.oauthCallbackPath = options.oauthCallbackPath;
+
+  //setup an oauthClient for the instance
+  this.oauthClient = new OAuth(null,                  //request token url
+                               null,                  //access token url
+                               consumerKey,           //consumer key
+                               consumerSecret,        //consumer secret
+                               OAUTH_VERSION,         //OAuth version
+                               null,                  //callback URL
+                               OAUTH_SIGNING_METHOD); //encryption type
 };
 
-Instapaper.prototype.getAuthenticateUrl = function(options, cb) {
+/**
+ * Appends the endpoint to the BASE_URL and URL formats the queryParams
+ *
+ * @param {String} endpoint
+ * @param {Object} queryParams
+ * @return {String}
+ */
+Instapaper.prototype.prepareUrl = function(endpoint, queryParams) {
+  if(! endpoint) throw new TypeError('You must provide a url endpoint.');
+
+  if(endpoint.charAt(0) !== '/') endpoint = '/' + endpoint;
+
+  var formattedUrl = BASE_URL + endpoint;
+
+  //if the options were provided and they're an object
+  if(typeof queryParams === 'object' && ! Array.isArray(queryParams)) {
+    formattedUrl += '?' + querystring.stringify(queryParams);
+  }
+
+  return formattedUrl;
+}
+
+Instapaper.prototype.makeRequest = function(method, url, data, cb) {
+  if(! method || typeof method !== 'string')
+    throw new TypeError('You must provide a request method.');
+
+  if(! url || typeof url !== 'string')
+    throw new TypeError('You must provide a url.');
+
+  if(typeof data == 'function') {
+    cb = data;
+    data = {};
+  }
+
+  if(! cb || typeof cb !== 'function')
+    throw new TypeError('You must provide a callback function.');
+
+  this.oauthClient.getProtectedResource(url ,method, this.consumerKey, this.consumerSecret, cb);
+};
+
+/**
+ * Authenticates the username and password with the Instapaper API
+ *
+ * @param {String} username
+ * @param {String} password
+ * @param {Object} options
+ * @param {Function} cb
+ * @return {*}
+ */
+Instapaper.prototype.authenticate = function(username, password, options, cb) {
+  //if no username is provided then return an error
+  if(typeof username == 'function') {
+    cb = username;
+    return cb('You must provide a username to authenticate.');
+  }
+
+  //if no password is provided then return an error
+  if(typeof password == 'function') {
+    cb = password;
+    return cb('You must provide a password to authenticate.');
+  }
+
   //if no options are supplied, then assign the passed function as the callback
   if(typeof options == 'function') {
     cb = options;
     options = {};
   }
 
-  //make sure a callback was supplied
+  //throw an error if no callback was supplied
   if(! cb) throw new TypeError('You must provide a callback.');
 
   //make sure options is an object
@@ -69,6 +146,12 @@ Instapaper.prototype.getAuthenticateUrl = function(options, cb) {
   if(options.oauthCallbackPath) this.oauthCallbackPath = options.oauthCallbackPath;
 
   if(! this.oauthCallbackPath) return cb('No OAuth callback path provided.');
+
+  var requestUrl = this.prepareUrl(ENDPOINT.oauth.accessToken, {
+                                    x_auth_username: username,
+                                    x_auth_password: password,
+                                    x_auth_mode: 'client_auth'
+                                  });
 
   return cb();
 }
