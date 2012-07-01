@@ -8,7 +8,10 @@
 
 //OAuth client
 var OAuth = require('oauth').OAuth;
-var querystring = require('qs');
+//query string parser
+var querystring = require('querystring');
+//REST client for authentication POST request
+var restler = require('restler');
 
 //constants
 var API_VERSION = 1;
@@ -23,18 +26,7 @@ var ENDPOINT = {
     verify      : '/account/verify_credentials'
   },
   bookmarks: {
-    list        : '/bookmarks/list',
-    update      : '/bookmarks/update_read_progress',
-    add         : '/bookmarks/add',
-    delete      : '/bookmarks/delete'
-    /*
-    star, unstar, archive, unarchive, move, get_text
-     */
-  },
-  folder: {
-    /*
-    list, add, delete, set_order
-     */
+    add         : '/bookmarks/add'
   }
 };
 
@@ -55,8 +47,11 @@ var Instapaper = function(consumerKey, consumerSecret, options) {
   //set the OAuth callback path if provided
   if(options && options.oauthCallbackPath) this.oauthCallbackPath = options.oauthCallbackPath;
 
+  //a RESTful client for makingthe POST request in authenticate()
+  this._restler = restler;
+
   //setup an oauthClient for the instance
-  this.oauthClient = new OAuth(null,                  //request token url
+  this._oauthClient = new OAuth(null,                  //request token url
                                null,                  //access token url
                                consumerKey,           //consumer key
                                consumerSecret,        //consumer secret
@@ -72,7 +67,7 @@ var Instapaper = function(consumerKey, consumerSecret, options) {
  * @param {Object} queryParams
  * @return {String}
  */
-Instapaper.prototype.prepareUrl = function(endpoint, queryParams) {
+Instapaper.prototype._prepareUrl = function(endpoint, queryParams) {
   if(! endpoint) throw new TypeError('You must provide a url endpoint.');
 
   if(endpoint.charAt(0) !== '/') endpoint = '/' + endpoint;
@@ -87,10 +82,14 @@ Instapaper.prototype.prepareUrl = function(endpoint, queryParams) {
   return formattedUrl;
 }
 
-Instapaper.prototype.makeRequest = function(method, url, data, cb) {
-  if(! method || typeof method !== 'string')
-    throw new TypeError('You must provide a request method.');
-
+/**
+ * makes an authenticated request to the Instapaper API
+ *
+ * @param {String} url
+ * @param {Object} data
+ * @param {Function} cb
+ */
+Instapaper.prototype._makeRequest = function(url, data, cb) {
   if(! url || typeof url !== 'string')
     throw new TypeError('You must provide a url.');
 
@@ -102,7 +101,8 @@ Instapaper.prototype.makeRequest = function(method, url, data, cb) {
   if(! cb || typeof cb !== 'function')
     throw new TypeError('You must provide a callback function.');
 
-  this.oauthClient.getProtectedResource(url ,method, this.consumerKey, this.consumerSecret, cb);
+  //all requests to the Instapaper API must be made via the POST method
+  this._oauthClient.post(url, this.consumerKey, this.consumerSecret, data, cb);
 };
 
 /**
@@ -110,11 +110,9 @@ Instapaper.prototype.makeRequest = function(method, url, data, cb) {
  *
  * @param {String} username
  * @param {String} password
- * @param {Object} options
  * @param {Function} cb
- * @return {*}
  */
-Instapaper.prototype.authenticate = function(username, password, options, cb) {
+Instapaper.prototype.authenticate = function(username, password, cb) {
   //if no username is provided then return an error
   if(typeof username == 'function') {
     cb = username;
@@ -127,33 +125,39 @@ Instapaper.prototype.authenticate = function(username, password, options, cb) {
     return cb('You must provide a password to authenticate.');
   }
 
-  //if no options are supplied, then assign the passed function as the callback
-  if(typeof options == 'function') {
-    cb = options;
-    options = {};
-  }
-
   //throw an error if no callback was supplied
   if(! cb) throw new TypeError('You must provide a callback.');
 
-  //make sure options is an object
-  if(typeof options != 'object'
-  || Object.prototype.toString.call(options) === '[object Array]') {
-    return cb('options must be an object.');
+  //get the access_token url
+  var requestUrl = this._prepareUrl(ENDPOINT.oauth.accessToken);
+
+  //create the necessary OAuth parameters and signature for the request
+  var orderedParameters = this._oauthClient._prepareParameters(null, null, 'POST', requestUrl, {
+                                                                x_auth_username: username,
+                                                                x_auth_password: password,
+                                                                x_auth_mode: 'client_auth'
+                                                              });
+
+  //turn the orderedParameters into a key:value object
+  var postBody = {};
+  for( var i= 0 ; i < orderedParameters.length; i++) {
+    postBody[orderedParameters[i][0]] = orderedParameters[i][1];
   }
 
-  //set the OAuth callback path if provided in the options
-  if(options.oauthCallbackPath) this.oauthCallbackPath = options.oauthCallbackPath;
+  //make the authentication request
+  //note: this is done using the "complete" event and the "err" and "data" variables to make testing
+  //      easier, normally you'd just do the callback in the "success" or "error" event handlers
+  var err = null, data = null;
 
-  if(! this.oauthCallbackPath) return cb('No OAuth callback path provided.');
-
-  var requestUrl = this.prepareUrl(ENDPOINT.oauth.accessToken, {
-                                    x_auth_username: username,
-                                    x_auth_password: password,
-                                    x_auth_mode: 'client_auth'
-                                  });
-
-  return cb();
+  this._restler.post(requestUrl, {
+    data: postBody
+  }).on('success', function(res) {
+    data = querystring.parse(res);
+  }).on('error', function(res) {
+    err = res;
+  }).on('complete', function() {
+    return cb(err, data);
+  });
 }
 
 module.exports = Instapaper;
