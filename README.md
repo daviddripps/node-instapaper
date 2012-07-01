@@ -1,4 +1,4 @@
 node-instapaper
 ===============
 
-Javascript Instapaer API client for Connect/Express
+Javascript Instapaper API client for Connect/Express

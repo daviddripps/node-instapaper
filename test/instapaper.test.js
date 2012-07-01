@@ -20,6 +20,11 @@ function stubFn(returnValue) {
     fn.executed = true;
     fn.args = arguments;
 
+    for(var i = 0, l = arguments.length; i < l; i++) {
+      if(typeof arguments[i] === 'function')
+        return arguments[i](returnValue);
+    }
+
     return returnValue;
   };
 
@@ -28,22 +33,27 @@ function stubFn(returnValue) {
   return fn;
 }
 
-//a setup function to create a new instance of the Instapaper class in the test's scope
-//it also creates a client without any options and one that responds with an error
-function createInstance() {
-  //no options client
-  this.noOptionsClient = new Instapaper('testConsumerKey', 'testConsumerSecret');
-
+/**
+ * a setup function to create a new instance of the Instapaper class in the test's scope.
+ * it also creates a client that responds with an error.
+ */
+function setupTests() {
   //normal success client
   this.instapaperClient = new Instapaper('testConsumerKey', 'testConsumerSecret', {
-    username: 'testUsername',
-    password: 'testPassword'
+    accessToken: 'testAccessToken',
+    accessTokenSecret: 'testAccessTokenSecret'
   });
+  //create a client that will respond with an error in the callback
+  this.errorClient = new Instapaper('testConsumerKey', 'testConsumerSecret');
 
   var realOauthClient = this.instapaperClient._oauthClient;
 
+  //add the default OAuth methods
   this.instapaperClient._oauthClient = Object.create(realOauthClient);
-  this.instapaperClient._oauthClient.post = (function() {
+  this.errorClient._oauthClient = Object.create(realOauthClient);
+
+  //this method stubs the _oauthClient.post method for testing
+  function postMethodStub(successOrErr) {
     var fn = function(url, consumerKey, consumerSecret, post_body, cb) {
       fn.executed = true;
       fn.args = arguments;
@@ -53,6 +63,8 @@ function createInstance() {
 
       if(! ApiResponse[url])
         return cb();
+      else if(successOrErr == 'error')
+        return cb(ApiResponse[url].error);
       else
         return cb(null, ApiResponse[url].success);
     }
@@ -60,64 +72,37 @@ function createInstance() {
     fn.executed = false;
 
     return fn;
-  }());
+  }
 
-  this.instapaperClient._restler = (function() {
+  //add the stubbed OAuth.post method
+  this.instapaperClient._oauthClient.post = new postMethodStub('success');
+  this.errorClient._oauthClient.post = new postMethodStub('error');
+
+  //this method stubs the _restler object for the authenticate() method
+  function restlerPostStub(successOrErr) {
     return {
       post: function() {
         return this;
       },
       on: function(event, cb) {
-        if(event == 'success') cb('oauth_token=K1S0vgSqfB1AhZ0mXpUHaEDuLsCaybtDnWgu8xZ0LpexWPxO' +
-                                 '&oauth_token_secret=UOaKOCzlsagWnmR2u86DEwpP7qoOi67FtCui1y3jEC');
-        else
+        if(event == successOrErr) {
+          var cbData = (successOrErr == 'error')
+              ? 'Invalid xAuth credentials.'
+              : 'oauth_token=testAccessToken&oauth_token_secret=testAccessTokenSecret';
+
+          cb(cbData);
+        } else {
           cb();
+        }
 
         return this;
       }
     };
-  }());
+  }
 
-  //create a client that will respond with an error in the callback
-  this.errorClient = new Instapaper('testConsumerKey', 'testConsumerSecret', {
-    oauthCallbackPath: '/instapaper/callback',
-    username: 'testUsername',
-    password: 'testPassword'
-  });
-
-  this.errorClient._oauthClient = Object.create(realOauthClient);
-  this.errorClient._oauthClient.post = (function() {
-    var fn = function(url, consumerKey, consumerSecret, post_body, cb) {
-      fn.executed = true;
-      fn.args = arguments;
-
-      //remove the BASE_URL to just leave the endpoint
-      url = url.replace(BASE_URL, '');
-
-      if(! ApiResponse[url])
-        return cb();
-      else
-        return cb(ApiResponse[url].error);
-    }
-
-    fn.executed = false;
-
-    return fn;
-  }());
-
-  this.errorClient._restler = (function() {
-    return {
-      post: function() {
-        return this;
-      },
-      on: function(event, cb) {
-        if(event == 'error') cb('Invalid xAuth credentials.');
-        else cb();
-
-        return this;
-      }
-    };
-  }());
+  //add the stubbed _restler client
+  this.instapaperClient._restler = new restlerPostStub('success');
+  this.errorClient._restler = new restlerPostStub('error');
 }
 
 /**
@@ -132,14 +117,14 @@ suite('Instapaper', function() {
    * Test an instance of the Instapaper class
    */
   suite('instance', function() {
-    setup(createInstance);
+    setup(setupTests);
 
     test('should be an object', function() {
       this.instapaperClient.should.be.a('object');
     });
 
     test('should set the consumerKey if provided as the first param', function() {
-      this.instapaperClient.consumerKey.should.equal('testConsumerKey');
+      this.instapaperClient._oauthClient._consumerKey.should.equal('testConsumerKey');
     });
 
     test('should throw if no consumerKey is provided', function() {
@@ -149,7 +134,7 @@ suite('Instapaper', function() {
     });
 
     test('should set the consumerSecret if provided as the second param', function() {
-      this.instapaperClient.consumerSecret.should.equal('testConsumerSecret');
+      this.instapaperClient._oauthClient._consumerSecret.should.equal('testConsumerSecret');
     });
 
     test('should throw if no consumerSecret is provided', function() {
@@ -158,9 +143,21 @@ suite('Instapaper', function() {
       }.bind(this)).should.throw('You must provide a consumer secret.');
     });
 
-    test('should set the accessToken if provided in the options');
-    test('should set the accessTokenSecret if provided in the options');
-    test('should throw error if accessToken XOR accessTokenSecret in the options');
+    test('should set the accessToken if provided in the options', function() {
+      this.instapaperClient.accessToken.should.equal('testAccessToken');
+    });
+
+    test('should set the accessTokenSecret if provided in the options', function() {
+      this.instapaperClient.accessTokenSecret.should.equal('testAccessTokenSecret');
+    });
+
+    test('should throw error if accessToken XOR accessTokenSecret in the options', function() {
+      (function() {
+        var client = new Instapaper('testConsumerKey', 'testConsumerSecret', {
+          accessTokenSecret: 'testAccessTokenSecret'
+        });
+      }).should.throw('You must provide BOTH an accessToken and accessTokenSecret.');
+    });
 
     test('should not throw if no options are provided', function() {
       (function() {
@@ -168,7 +165,9 @@ suite('Instapaper', function() {
       }.bind(this)).should.not.throw();
     });
 
-    test('should create a _restler instance for the authenticate() method');
+    test('should create a _restler instance for the authenticate() method', function() {
+      should.exist(this.instapaperClient._restler);
+    });
 
     test('should create an _oauthClient if valid consumer key and secret are provided', function() {
       var client = new Instapaper('testConsumerKey', 'testConsumerSecret');
@@ -181,7 +180,7 @@ suite('Instapaper', function() {
      * Test the _prepareUrl() method
      */
     suite('._prepareUrl()', function() {
-      setup(createInstance);
+      setup(setupTests);
 
       test('should be a function', function() {
         this.instapaperClient._prepareUrl.should.be.a('function');
@@ -214,10 +213,7 @@ suite('Instapaper', function() {
      * Test the _makeRequest() method
      */
     suite('._makeRequest()', function() {
-      setup(function() {
-        createInstance.bind(this).call();
-
-      });
+      setup(setupTests);
 
       test('should be a function', function() {
         this.instapaperClient._makeRequest.should.be.a('function');
@@ -249,41 +245,57 @@ suite('Instapaper', function() {
         }.bind(this)).should.throw('You must provide a callback function.');
       });
 
+      test('should respond with error of no accessToken is set', function() {
+        this.errorClient._makeRequest('http://www.example.com', function(err) {
+          should.exist(err);
+          err.should.equal('You must provide an oauth token before making authenticated requests.');
+        });
+      });
+
+      test('should respond with error of no accessTokenSecret is set', function() {
+        this.errorClient.accessToken = 'testAccessToken';
+        this.errorClient._makeRequest('http://www.example.com', function(err) {
+          should.exist(err);
+          err.should.match(/^You must provide an oauth secret before making.*/);
+        });
+      });
+
       test('should call OAuth.post() for requests with the correct params',
       function(done) {
         var client = this.instapaperClient;
         client._makeRequest('http://www.example.com', function() {
           client._oauthClient.post.executed.should.be.true;
           client._oauthClient.post.args[0].should.equal('http://www.example.com');
-          client._oauthClient.post.args[1].should.equal('testConsumerKey');
-          client._oauthClient.post.args[2].should.equal('testConsumerSecret');
+          client._oauthClient.post.args[1].should.equal('testAccessToken');
+          client._oauthClient.post.args[2].should.equal('testAccessTokenSecret');
           done();
         });
       });
 
       suite('request callbacks', function() {
-        test('should respond with success if request is successful', function() {
+        test('should respond with success if request is successful', function(done) {
           var client = this.instapaperClient;
-          client._makeRequest('/oauth/access_token', function(err, res) {
+          client._makeRequest('/account/verify_credentials', function(err, res) {
             should.not.exist(err);
             should.exist(res);
+            done();
           });
         });
 
         test('should forward errors from the _oauthClient', function() {
           var client = this.errorClient;
-          client._makeRequest('/oauth/access_token', function(err) {
+          client.accessToken = 'testAccessToken';
+          client.accessTokenSecret = 'testAccessTokenSecret';
+          client._makeRequest('/account/verify_credentials', function(err) {
             should.exist(err);
+            err.should.equal('Not logged in');
           });
         });
       });
     });
 
-    /**
-     * Test the authenticate() method
-     */
     suite('.authenticate()', function() {
-      setup(createInstance);
+      setup(setupTests);
 
       test('should be a function', function() {
         this.instapaperClient.authenticate.should.be.a('function');
@@ -296,59 +308,71 @@ suite('Instapaper', function() {
         });
       });
 
-      test('should throw if no callback is provided', function() {
-        this.instapaperClient.authenticate.should.throw('You must provide a callback.');
-      });
-
       test('should respond with error if the username is not provided as the first param',
-      function(done) {
-        this.noOptionsClient.authenticate(function(err) {
-          err.should.equal('You must provide a username to authenticate.');
-          done();
-        });
-      });
+          function(done) {
+            this.instapaperClient.authenticate(function(err) {
+              err.should.equal('You must provide a username to authenticate.');
+              done();
+            });
+          });
 
       test('should respond with error if the password is not provided as the second param',
-      function(done) {
-        this.noOptionsClient.authenticate('testUsername', function(err) {
-          err.should.equal('You must provide a password to authenticate.');
-          done();
-        });
-      });
+          function(done) {
+            this.instapaperClient.authenticate('testUsername', function(err) {
+              err.should.equal('You must provide a password to authenticate.');
+              done();
+            });
+          });
 
       /**
        * Integration test:
        *   Tests the authenticate() method's integration with the _prepareUrl() method
        */
       test('should call _prepareUrl() with the correct endpoint for an authentication request',
-      function(done) {
-        var client = this.instapaperClient;
-        client._prepareUrl = stubFn('http://www.instapaper.com/api/1/oauth/access_token');
-        client.authenticate('testUsername', 'testPassword', function() {
-          client._prepareUrl.args[0].should.equal('/oauth/access_token');
-          done();
-        });
-      });
+          function(done) {
+            var client = this.instapaperClient;
+            client._prepareUrl = stubFn('http://www.instapaper.com/api/1/oauth/access_token');
+            client.authenticate('testUsername', 'testPassword', function() {
+              client._prepareUrl.args[0].should.equal('/oauth/access_token');
+              done();
+            });
+          });
 
       /**
        * Integration tests:
        *   Test the authenticate() method's integration with the Restler object
        */
       suite('OAuth request', function() {
-        setup(createInstance);
+        setup(setupTests);
 
         test('should respond with object containing the OAuth token and secret if successful',
+            function(done) {
+              this.instapaperClient.authenticate('testUsername', 'testPassword', function(err, data) {
+                should.not.exist(err);
+                data.should.have.keys('oauth_token', 'oauth_token_secret');
+                (typeof data.oauth_token).should.be.a('string');
+                (typeof data.oauth_token_secret).should.be.a('string');
+                done();
+              });
+            });
+
+        test('should set the instance accessToken and accessTokenSecret if successful',
         function(done) {
-          this.instapaperClient.authenticate('testUsername', 'testPassword', function(err, data) {
+          var client = this.errorClient;
+          client._restler = this.instapaperClient._restler;
+
+          should.not.exist(client.accessToken);
+          should.not.exist(client.accessTokenSecret);
+
+          client.authenticate('testUsername', 'testPassword', function(err, data) {
             should.not.exist(err);
-            data.should.have.keys('oauth_token', 'oauth_token_secret');
-            (typeof data.oauth_token).should.be.a('string');
-            (typeof data.oauth_token_secret).should.be.a('string');
+            should.exist(client.accessToken);
+            client.accessToken.should.equal('testAccessToken');
+            should.exist(client.accessTokenSecret);
+            client.accessTokenSecret.should.equal('testAccessTokenSecret');
             done();
           });
         });
-
-        test('should set the instance accessToken and accessTokenSecret if successful');
 
         test('should respond with error if unsuccessful', function(done) {
           this.errorClient.authenticate('testUsername', 'testPassword', function(err, data) {
@@ -358,27 +382,100 @@ suite('Instapaper', function() {
         });
       });
     });
-
+    
     suite('.getUser()', function() {
-      setup(createInstance());
+      setup(setupTests);
 
-      test('should be a function');
-      test('should call the provided callback');
-      test('should throw if no callback is provided');
-      test('should respond with an error if the accessToken or accessTokenSecret is not provided');
-      test('should call _prepareUrl() with the correct endpoint');
+      test('should be a function', function() {
+        this.instapaperClient.getUser.should.be.a('function');
+      });
+      test('should call the provided callback', function(done) {
+        this.instapaperClient.getUser(function() {
+          should.ok(true);
+          done();
+        });
+      });
+      test('should throw if no callback is provided', function() {
+        this.instapaperClient.getUser.should.throw('You must provide a callback function.');
+      });
+      test('should throw if callback is not a function', function() {
+        (function() {
+          var userInfo = this.instapaperClient.getUser({});
+        }.bind(this)).should.throw('You must provide a callback function.');
+      });
+      test('should respond with an error if the accessToken or accessTokenSecret is not provided',
+      function() {
+        this.errorClient.getUser(function(err) {
+          err.should.equal('No accessToken or accessTokenSecret provided.');
+        });
+      });
 
+      test('should call _prepareUrl() with the correct endpoint', function() {
+        var client = this.instapaperClient;
+        client._prepareUrl = stubFn('http://www.instapaper.com/api/1/account/verify_credentials');
+        client.getUser(function() {
+          client._prepareUrl.args[0].should.equal('/account/verify_credentials');
+        });
+      });
+
+      /**
+       * Integration tests:
+       *   Tests the getuser() method's integration with the _makeRequest() method
+       */
       suite('OAuth request', function() {
-        setup(createInstance);
+        setup(function() {
+          setupTests.bind(this).call()
 
-        test('response object should have a type, user_id, and username on success');
-        test('response object.type should equal "user" on success');
-        test('should respond with an error if unsuccessful');
+          var getUserApiResponses = ApiResponse['/account/verify_credentials'];
+          this.instapaperClient._makeRequest = stubFn(null, getUserApiResponses.success);
+          this.errorClient._makeRequest = stubFn(getUserApiResponses.error);
+        });
+
+        test('should call _makeRequest()', function(done) {
+          var client = this.instapaperClient;
+          client.getUser(function() {
+            client._makeRequest.executed.should.be.true;
+            done();
+          });
+        });
+
+        test('should provide the correct url and data to _makeRequest()', function(done) {
+          var client = this.instapaperClient;
+          client.getUser(function() {
+            client._makeRequest.executed.should.be.true;
+            client._makeRequest.args[0].should.equal(BASE_URL + '/account/verify_credentials');
+            client._makeRequest.args[1].should.be.a('function');
+            done();
+          });
+        });
+      });
+
+      suite('OAuth response', function() {
+        setup(setupTests);
+
+        test('should respond with an error if unsuccessful', function() {
+          var client = this.errorClient;
+          client.accessToken = 'testAccessToken';
+          client.accessTokenSecret = 'testAccessTokenSecret';
+          client.getUser(function(err) {
+            should.exist(err);
+            /** @see ./lib/instapaper_api.stub.js for error value */
+            err.should.equal('Not logged in');
+          });
+        });
+
+        test('response object should have a user_id and username on success', function() {
+          var client = this.instapaperClient;
+          client.getUser(function(err, user) {
+            should.not.exist(err);
+            user.should.have.keys('user_id', 'username');
+          });
+        });
       });
     });
 
     suite('.addBookmark()', function() {
-      setup(createInstance());
+      setup(setupTests);
 
       test('should be a function');
       test('should call the provided callback');
@@ -388,7 +485,7 @@ suite('Instapaper', function() {
       test('should call _prepareUrl() with the correct endpoint');
 
       suite('OAuth request', function() {
-        setup(createInstance);
+        setup(setupTests);
 
         test('should send url with request');
         test('should send title with request if provided');

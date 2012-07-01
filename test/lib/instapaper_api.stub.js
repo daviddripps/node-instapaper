@@ -11,12 +11,15 @@ module.exports = {
                'you sent 0, 1341088595 seconds away.'
   },
   '/account/verify_credentials': {
-    success: {
+    success: [ {
       type: 'user',
       user_id: '12345678',
       username: 'testUsernameFTW'
-    },
-    error: ''
+    } ],
+    error: {
+      statusCode: 403,
+      data: '[{"type":"error","error_code":403,"message":"Not logged in"}]'
+    }
   },
   '/bookmark/add': {
     success: '',

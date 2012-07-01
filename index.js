@@ -15,7 +15,7 @@ var restler = require('restler');
 
 //constants
 var API_VERSION = 1;
-var OAUTH_VERSION = '1.0a';
+var OAUTH_VERSION = '1.0';
 var OAUTH_SIGNING_METHOD = 'HMAC-SHA1';
 var BASE_URL = 'https://www.instapaper.com/api/' + API_VERSION;
 var ENDPOINT = {
@@ -35,17 +35,28 @@ var ENDPOINT = {
  *
  * @param {String} consumerKey - the applications Instapaper consumer key
  * @param {String} consumerSecret - the applications Instapaper consumer secret
+ * @param {Object} options - usually used to supply an accessToken and accessTokenSecret
  * @constructor
  */
 var Instapaper = function(consumerKey, consumerSecret, options) {
   if(! consumerKey) throw new TypeError('You must provide a consumer key.');
-  this.consumerKey = consumerKey;
-
   if(! consumerSecret) throw new TypeError('You must provide a consumer secret.');
-  this.consumerSecret = consumerSecret;
 
-  //set the OAuth callback path if provided
-  if(options && options.oauthCallbackPath) this.oauthCallbackPath = options.oauthCallbackPath;
+  if(options) {
+    if(options.accessToken) {
+      if(! options.accessTokenSecret)
+        throw new Error('You must provide BOTH an accessToken and accessTokenSecret.');
+
+      this.accessToken = options.accessToken;
+    }
+
+    if(options.accessTokenSecret) {
+      if(! options.accessToken)
+        throw new Error('You must provide BOTH an accessToken and accessTokenSecret.');
+
+      this.accessTokenSecret = options.accessTokenSecret;
+    }
+  }
 
   //a RESTful client for makingthe POST request in authenticate()
   this._restler = restler;
@@ -95,14 +106,64 @@ Instapaper.prototype._makeRequest = function(url, data, cb) {
 
   if(typeof data == 'function') {
     cb = data;
-    data = {};
+    data = null;
   }
 
   if(! cb || typeof cb !== 'function')
     throw new TypeError('You must provide a callback function.');
 
-  //all requests to the Instapaper API must be made via the POST method
-  this._oauthClient.post(url, this.consumerKey, this.consumerSecret, data, cb);
+  if(! this.accessToken)
+    return cb('You must provide an oauth token before making authenticated requests.');
+
+  if(! this.accessTokenSecret)
+    return cb('You must provide an oauth secret before making authenticated requests.');
+
+  var should = require('should');
+
+  //Makes the secure request to the Instapaper API. All requests to the Instapaper API must be
+  //made via the POST method
+  this._oauthClient.post(url, this.accessToken, this.accessTokenSecret, data, function(err, res) {
+    if(err || ! res) {
+      if(err && err.data) {
+        try {
+          err.data = JSON.parse(err.data);
+        } catch(ignore) {}
+
+        if(Array.isArray(err.data))
+          return cb(err.data[0].message);
+        else
+          return cb(err.data);
+      } else {
+        return cb(err || 'An error occurred.  Sorry for not being a helpful description.');
+      }
+    }
+
+    //organize the response data by the type so it's easy for the other methods to filter
+    var dataOrganizedByType = {};
+
+    for(var i = 0, l = res.length; i < l; i++) {
+      //get the type and remove it from the record
+      var recordType = new String(res[i].type);
+      var recordNoType = Object.create(Object.getPrototypeOf(res[i]));
+      var props = Object.getOwnPropertyNames(res[i]);
+      var pName;
+      //remove the type from the object
+      props.splice(props.indexOf('type'), 1);
+      for (var p in props) {
+        pName = props[p];
+        Object.defineProperty(recordNoType, pName, Object.getOwnPropertyDescriptor(res[i], pName));
+      };
+
+      //if there's no key for this type yet, create it
+      if(! dataOrganizedByType[recordType])
+        dataOrganizedByType[recordType] = [];
+
+      //set the record data, sans type, to the type key
+      dataOrganizedByType[recordType].push(recordNoType);
+    }
+
+    return cb(null, dataOrganizedByType);
+  });
 };
 
 /**
@@ -125,9 +186,6 @@ Instapaper.prototype.authenticate = function(username, password, cb) {
     return cb('You must provide a password to authenticate.');
   }
 
-  //throw an error if no callback was supplied
-  if(! cb) throw new TypeError('You must provide a callback.');
-
   //get the access_token url
   var requestUrl = this._prepareUrl(ENDPOINT.oauth.accessToken);
 
@@ -147,17 +205,33 @@ Instapaper.prototype.authenticate = function(username, password, cb) {
   //make the authentication request
   //note: this is done using the "complete" event and the "err" and "data" variables to make testing
   //      easier, normally you'd just do the callback in the "success" or "error" event handlers
-  var err = null, data = null;
+  var err = null, data = null, self = this;
 
   this._restler.post(requestUrl, {
     data: postBody
   }).on('success', function(res) {
     data = querystring.parse(res);
+    self.accessToken = data.oauth_token;
+    self.accessTokenSecret = data.oauth_token_secret;
   }).on('error', function(res) {
     err = res;
   }).on('complete', function() {
     return cb(err, data);
   });
-}
+};
+
+Instapaper.prototype.getUser = function(cb) {
+  if(! cb || typeof cb !== 'function')
+    throw new TypeError('You must provide a callback function.');
+
+  if(! this.accessToken || ! this.accessTokenSecret)
+    return cb('No accessToken or accessTokenSecret provided.');
+
+  var requestUrl = this._prepareUrl(ENDPOINT.account.verify);
+
+  this._makeRequest(requestUrl, function(err, data) {
+    cb(err, (data && data.user && data.user[0] || null));
+  });
+};
 
 module.exports = Instapaper;
