@@ -162,10 +162,6 @@ suite('Instapaper', function() {
       }.bind(this)).should.not.throw();
     });
 
-    test('should create a _restler instance for the authenticate() method', function() {
-      should.exist(this.instapaperClient._restler);
-    });
-
     test('should create an _oauthClient if valid consumer key and secret are provided', function() {
       var client = new Instapaper('testConsumerKey', 'testConsumerSecret');
       client._oauthClient.should.be.a('object');

@@ -10,8 +10,6 @@
 var OAuth = require('oauth').OAuth;
 //query string parser
 var querystring = require('querystring');
-//REST client for authentication POST request
-var restler = require('restler');
 
 //constants
 var API_VERSION = 1;
@@ -57,9 +55,6 @@ var Instapaper = function(consumerKey, consumerSecret, options) {
       this.accessTokenSecret = options.accessTokenSecret;
     }
   }
-
-  //a RESTful client for makingthe POST request in authenticate()
-  this._restler = restler;
 
   //setup an oauthClient for the instance
   this._oauthClient = new OAuth(null,                  //request token url
