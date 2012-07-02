@@ -20,9 +20,9 @@ function stubFn(returnValue) {
     fn.executed = true;
     fn.args = arguments;
 
-    for(var i = 0, l = arguments.length; i < l; i++) {
-      if(typeof arguments[i] === 'function')
-        return arguments[i](returnValue);
+    for(var i = 0, l = fn.args.length; i < l; i++) {
+      if(typeof fn.args[i] === 'function')
+        return fn.args[i](returnValue);
     }
 
     return returnValue;
@@ -433,24 +433,26 @@ suite('Instapaper', function() {
           setupTests.bind(this).call()
 
           var getUserApiResponses = ApiResponse['/account/verify_credentials'];
-          this.instapaperClient._makeRequest = stubFn(null, getUserApiResponses.success);
-          this.errorClient._makeRequest = stubFn(getUserApiResponses.error);
+          this.instapaperClient._oauthClient.get = stubFn(null, getUserApiResponses.success);
+          this.errorClient._oauthClient.get = stubFn(getUserApiResponses.error);
         });
 
-        test('should call _makeRequest()', function(done) {
+        test('should call _oauthClient.get()', function(done) {
           var client = this.instapaperClient;
           client.getUser(function() {
-            client._makeRequest.executed.should.be.true;
+            client._oauthClient.get.executed.should.be.true;
             done();
           });
         });
 
-        test('should provide the correct url and data to _makeRequest()', function(done) {
+        test('should provide the correct url and data to _oauthClient.get()', function(done) {
           var client = this.instapaperClient;
           client.getUser(function() {
-            client._makeRequest.executed.should.be.true;
-            client._makeRequest.args[0].should.equal(BASE_URL + '/account/verify_credentials');
-            client._makeRequest.args[1].should.be.a('function');
+            client._oauthClient.get.executed.should.be.true;
+            client._oauthClient.get.args[0].should.equal(BASE_URL + '/account/verify_credentials');
+            client._oauthClient.get.args[1].should.equal('testAccessToken');
+            client._oauthClient.get.args[2].should.equal('testAccessTokenSecret');
+            client._oauthClient.get.args[3].should.be.a('function');
             done();
           });
         });
@@ -486,24 +488,143 @@ suite('Instapaper', function() {
     suite('.addBookmark()', function() {
       setup(setupTests);
 
-      test('should be a function');
-      test('should call the provided callback');
-      test('should throw if no callback is provided');
-      test('should respond with an error if no accessToken or accessTokenSecret is provided');
-      test('should respond with an error if no url is provided');
-      test('should call _prepareUrl() with the correct endpoint');
+      test('should be a function', function() {
+        this.instapaperClient.addBookmark.should.be.a('function');
+      });
+
+      test('should throw if no url is provided', function() {
+        this.instapaperClient.addBookmark.should.throw('You must provide a url to bookmark.');
+      });
+
+      test('should call the provided callback', function(done) {
+        this.instapaperClient.addBookmark('fakeUrl', function() {
+          should.ok(true);
+          done();
+        });
+      });
+
+      test('should throw if no callback is provided', function() {
+        (function() {
+          this.instapaperClient.addBookmark('fakeUrl');
+        }.bind(this)).should.throw('You must provide a callback.');
+      });
+
+      test('should still execute callback if options are provided', function(done) {
+        this.instapaperClient.addBookmark('fakeUrl', {}, function() {
+          should.ok(true);
+          done();
+        });
+      });
+
+      test('should respond with an error if no accessToken or accessTokenSecret is provided',
+      function() {
+        (function() {
+          this.errorClient.addBookmark('fakeUrl', function() {});
+        }.bind(this)).should.throw('No access token or secret provided.');
+      });
+
+      test('should call _prepareUrl() with the correct endpoint', function() {
+        var client = this.instapaperClient;
+        client._prepareUrl = stubFn(BASE_URL + '/bookmarks/add');
+        client.addBookmark('fakeUrl', function() {
+          client._prepareUrl.args[0].should.equal('/bookmarks/add');
+        });
+      });
 
       suite('OAuth request', function() {
         setup(setupTests);
 
-        test('should send url with request');
-        test('should send title with request if provided');
-        test('should send description with request if provided');
-        test('should send folder_id with request if provided');
-        test('should send resolve_final_url with request if provided');
-        test('should have a type, user_id, and username in the response object on success');
-        test('should have a "type" key equal to "user" in the response object on success');
-        test('should respond with an error if unsuccessful');
+        test('should send post request with proper params', function() {
+          var client = this.instapaperClient;
+          client.addBookmark('fakeUrl', function() {
+            client._oauthClient.post.executed.should.be.true;
+            client._oauthClient.post.args[0].should.equal('/bookmarks/add');
+            client._oauthClient.post.args[1].should.equal('testAccessToken');
+            client._oauthClient.post.args[2].should.equal('testAccessTokenSecret');
+            client._oauthClient.post.args[3].should.be.a('object');
+            client._oauthClient.post.args[4].should.be.a('function');
+          });
+        });
+
+        test('should send post request with proper params when options are provided', function() {
+          var client = this.instapaperClient;
+          client.addBookmark('fakeUrl', {}, function() {
+            client._oauthClient.post.executed.should.be.true;
+            client._oauthClient.post.args[0].should.equal('/bookmarks/add');
+            client._oauthClient.post.args[1].should.equal('testAccessToken');
+            client._oauthClient.post.args[2].should.equal('testAccessTokenSecret');
+            client._oauthClient.post.args[3].should.be.a('object');
+            client._oauthClient.post.args[4].should.be.a('function');
+          });
+        });
+
+        test('should send title with request if provided', function() {
+          var client = this.instapaperClient;
+          client.addBookmark('fakeUrl', {
+            title: 'fakeTitle'
+          }, function() {
+            client._oauthClient.post.executed.should.be.true;
+            client._oauthClient.post.args[3].should.have.keys('title');
+          });
+        });
+
+        test('should send description with request if provided', function() {
+          var client = this.instapaperClient;
+          client.addBookmark('fakeUrl', {
+            title: 'fakeTitle',
+            description: 'fakeDescription'
+          }, function() {
+            client._oauthClient.post.executed.should.be.true;
+            client._oauthClient.post.args[3].should.have.keys('title', 'description');
+          });
+        });
+
+        test('should send folder_id with request if provided', function() {
+          var client = this.instapaperClient;
+          client.addBookmark('fakeUrl', {
+            title: 'fakeTitle',
+            description: 'fakeDescription',
+            folder_id: 'testFolderId'
+          }, function() {
+            client._oauthClient.post.executed.should.be.true;
+            client._oauthClient.post.args[3].should.have.keys('title', 'description', 'folder_id');
+          });
+        });
+
+        test('should send resolve_final_url with request if provided', function() {
+          var client = this.instapaperClient;
+          client.addBookmark('fakeUrl', {
+            title: 'fakeTitle',
+            description: 'fakeDescription',
+            folder_id: 'testFolderId',
+            resolve_final_url: 0
+          }, function() {
+            client._oauthClient.post.executed.should.be.true;
+            client._oauthClient.post.args[3].should.have.keys('title', 'description',
+                                                              'folder_id', 'resolve_final_url');
+          });
+        });
+
+        test('should have all the correct data in the response object on success', function() {
+          var client = this.instapaperClient;
+          client.addBookmark('testUrl', function(err, res) {
+            should.not.exist(err);
+            should.exist(res);
+
+            res.should.have.keys('bookmark_id', 'url', 'title', 'starred', 'time', 'progress',
+                                 'description', 'private_source', 'hash', 'progress_timestamp');
+          });
+        });
+
+        test('should respond with an error if unsuccessful', function() {
+          var client = this.errorClient;
+          client.accessToken = 'testAccessToken';
+          client.accessTokenSecret = 'testAccessTokenSecret';
+          client.addBookmark('testUrl', function(err) {
+            should.exist(err);
+            err.should.equal('Not logged in');
+          });
+        });
       });
     });
   });

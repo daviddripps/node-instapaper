@@ -21,8 +21,10 @@ module.exports = {
       data: '[{"type":"error","error_code":403,"message":"Not logged in"}]'
     }
   },
-  '/bookmark/add': {
-    success: '',
-    error: ''
+  '/bookmarks/add': {
+    success: '[{"type":"bookmark","bookmark_id":299276832,"url":"http:\/\/www.daviddripps.com",' +
+               '"title":"David Dripps","description":"","time":1341205558,"starred":"0",' +
+               '"private_source":"","hash":"pNIo07VD","progress":0,"progress_timestamp":0}]',
+    error: '[{"type":"error","error_code":403,"message":"Not logged in"}]'
   }
 };

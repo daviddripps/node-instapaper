@@ -206,6 +206,11 @@ Instapaper.prototype.authenticate = function(username, password, cb) {
   });
 };
 
+/**
+ * gets the user id and username corresponding to the provided accessToken
+ *
+ * @param cb
+ */
 Instapaper.prototype.getUser = function(cb) {
   if(! cb || typeof cb !== 'function')
     throw new TypeError('You must provide a callback function.');
@@ -213,10 +218,111 @@ Instapaper.prototype.getUser = function(cb) {
   if(! this.accessToken || ! this.accessTokenSecret)
     return cb('No accessToken or accessTokenSecret provided.');
 
-  var requestUrl = this._prepareUrl(ENDPOINT.account.verify);
+  var verifyUrl = this._prepareUrl(ENDPOINT.account.verify);
 
-  this._makeRequest(requestUrl, function(err, data) {
-    cb(err, (data && data.user && data.user[0] || null));
+  this._oauthClient.get(verifyUrl, this.accessToken, this.accessTokenSecret, function(err, res) {
+    if(err || ! res) {
+      if(err && err.data) {
+        try {
+          err.data = JSON.parse(err.data);
+        } catch(ignore) {}
+
+        if(Array.isArray(err.data))
+          return cb(err.data[0].message);
+        else
+          return cb(err.data);
+      } else {
+        return cb(err || 'An error occurred.  Sorry for not being a helpful description.');
+      }
+    }
+
+    //organize the response data by the type so it's easy for the other methods to filter
+    var dataOrganizedByType = {};
+
+    for(var i = 0, l = res.length; i < l; i++) {
+      //get the type and remove it from the record
+      var recordType = new String(res[i].type);
+      var recordNoType = Object.create(Object.getPrototypeOf(res[i]));
+      var props = Object.getOwnPropertyNames(res[i]);
+      var pName;
+      //remove the type from the object
+      props.splice(props.indexOf('type'), 1);
+      for (var p in props) {
+        pName = props[p];
+        Object.defineProperty(recordNoType, pName, Object.getOwnPropertyDescriptor(res[i], pName));
+      };
+
+      //if there's no key for this type yet, create it
+      if(! dataOrganizedByType[recordType])
+        dataOrganizedByType[recordType] = [];
+
+      //set the record data, sans type, to the type key
+      dataOrganizedByType[recordType].push(recordNoType);
+    }
+
+    return cb(null, dataOrganizedByType.user[0]);
+  });
+};
+
+Instapaper.prototype.addBookmark = function(url, options, cb) {
+  if(! url)
+    throw new TypeError('You must provide a url to bookmark.');
+
+  if(typeof options == 'function') {
+    cb = options;
+    options = {};
+  }
+
+  if(! cb || typeof cb !== 'function')
+    throw new TypeError('You must provide a callback.');
+
+  if(! this.accessToken || ! this.accessTokenSecret)
+    throw new TypeError('No access token or secret provided.');
+
+  var addUrl = this._prepareUrl(ENDPOINT.bookmarks.add);
+
+  this._oauthClient.post(addUrl, this.accessToken, this.accessTokenSecret, options,
+  function(err, res) {
+    if(err || ! res) {
+      try {
+        err = JSON.parse(err);
+      } catch(ignore) {}
+
+      if(Array.isArray(err))
+        return cb(err[0].message);
+
+      return cb(err || 'An error occurred.  Sorry for not being a helpful description.');
+    }
+
+    try {
+      res = JSON.parse(res);
+    } catch(ignore) {}
+
+    //organize the response data by the type so it's easy for the other methods to filter
+    var dataOrganizedByType = {};
+
+    for(var i = 0, l = res.length; i < l; i++) {
+      //get the type and remove it from the record
+      var recordType = new String(res[i].type);
+      var recordNoType = Object.create(Object.getPrototypeOf(res[i]));
+      var props = Object.getOwnPropertyNames(res[i]);
+      var pName;
+      //remove the type from the object
+      props.splice(props.indexOf('type'), 1);
+      for (var p in props) {
+        pName = props[p];
+        Object.defineProperty(recordNoType, pName, Object.getOwnPropertyDescriptor(res[i], pName));
+      };
+
+      //if there's no key for this type yet, create it
+      if(! dataOrganizedByType[recordType])
+        dataOrganizedByType[recordType] = [];
+
+      //set the record data, sans type, to the type key
+      dataOrganizedByType[recordType].push(recordNoType);
+    }
+
+    cb(null, dataOrganizedByType.bookmark[0]);
   });
 };
 
