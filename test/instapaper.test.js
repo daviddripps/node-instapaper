@@ -78,31 +78,28 @@ function setupTests() {
   this.instapaperClient._oauthClient.post = new postMethodStub('success');
   this.errorClient._oauthClient.post = new postMethodStub('error');
 
-  //this method stubs the _restler object for the authenticate() method
-  function restlerPostStub(successOrErr) {
-    return {
-      post: function() {
-        return this;
-      },
-      on: function(event, cb) {
-        if(event == successOrErr) {
-          var cbData = (successOrErr == 'error')
-              ? 'Invalid xAuth credentials.'
-              : 'oauth_token=testAccessToken&oauth_token_secret=testAccessTokenSecret';
+  function secureRequestStub(successOrErr) {
+    var fn = function(token, secret, method, url, params, asdf, jkl, cb) {
+      fn.executed = true;
+      fn.args = arguments;
 
-          cb(cbData);
-        } else {
-          cb();
-        }
+      url = url.replace(BASE_URL, '');
 
-        return this;
-      }
-    };
+      if(! ApiResponse[url])
+        return cb();
+      else if(successOrErr == 'error')
+        return cb(ApiResponse[url].error);
+      else
+        return cb(null, ApiResponse[url].success);
+    }
+
+    fn.executed = false;
+
+    return fn;
   }
 
-  //add the stubbed _restler client
-  this.instapaperClient._restler = new restlerPostStub('success');
-  this.errorClient._restler = new restlerPostStub('error');
+  this.instapaperClient._oauthClient._performSecureRequest = secureRequestStub('success');
+  this.errorClient._oauthClient._performSecureRequest = secureRequestStub('error');
 }
 
 /**
@@ -294,6 +291,9 @@ suite('Instapaper', function() {
       });
     });
 
+    /**
+     * Test the authenticate() method
+     */
     suite('.authenticate()', function() {
       setup(setupTests);
 
@@ -309,34 +309,34 @@ suite('Instapaper', function() {
       });
 
       test('should respond with error if the username is not provided as the first param',
-          function(done) {
-            this.instapaperClient.authenticate(function(err) {
-              err.should.equal('You must provide a username to authenticate.');
-              done();
-            });
-          });
+      function(done) {
+        this.instapaperClient.authenticate(function(err) {
+          err.should.equal('You must provide a username to authenticate.');
+          done();
+        });
+      });
 
       test('should respond with error if the password is not provided as the second param',
-          function(done) {
-            this.instapaperClient.authenticate('testUsername', function(err) {
-              err.should.equal('You must provide a password to authenticate.');
-              done();
-            });
-          });
+      function(done) {
+        this.instapaperClient.authenticate('testUsername', function(err) {
+          err.should.equal('You must provide a password to authenticate.');
+          done();
+        });
+      });
 
       /**
        * Integration test:
        *   Tests the authenticate() method's integration with the _prepareUrl() method
        */
       test('should call _prepareUrl() with the correct endpoint for an authentication request',
-          function(done) {
-            var client = this.instapaperClient;
-            client._prepareUrl = stubFn('http://www.instapaper.com/api/1/oauth/access_token');
-            client.authenticate('testUsername', 'testPassword', function() {
-              client._prepareUrl.args[0].should.equal('/oauth/access_token');
-              done();
-            });
-          });
+      function(done) {
+        var client = this.instapaperClient;
+        client._prepareUrl = stubFn('http://www.instapaper.com/api/1/oauth/access_token');
+        client.authenticate('testUsername', 'testPassword', function() {
+          client._prepareUrl.args[0].should.equal('/oauth/access_token');
+          done();
+        });
+      });
 
       /**
        * Integration tests:
@@ -358,8 +358,10 @@ suite('Instapaper', function() {
 
         test('should set the instance accessToken and accessTokenSecret if successful',
         function(done) {
-          var client = this.errorClient;
-          client._restler = this.instapaperClient._restler;
+          var client = this.instapaperClient;
+
+          delete client.accessToken;
+          delete client.accessTokenSecret;
 
           should.not.exist(client.accessToken);
           should.not.exist(client.accessTokenSecret);
@@ -376,13 +378,17 @@ suite('Instapaper', function() {
 
         test('should respond with error if unsuccessful', function(done) {
           this.errorClient.authenticate('testUsername', 'testPassword', function(err, data) {
-            err.should.equal('Invalid xAuth credentials.');
+            err.should.equal('oauth_timestamp is too far away; we believe it is now 1341088595, ' +
+                'you sent 0, 1341088595 seconds away.');
             done();
           });
         });
       });
     });
-    
+
+    /**
+     * Test the getUser() method
+     */
     suite('.getUser()', function() {
       setup(setupTests);
 
@@ -474,6 +480,9 @@ suite('Instapaper', function() {
       });
     });
 
+    /**
+     * Test the addBookmark() method
+     */
     suite('.addBookmark()', function() {
       setup(setupTests);
 

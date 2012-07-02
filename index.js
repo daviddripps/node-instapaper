@@ -187,36 +187,22 @@ Instapaper.prototype.authenticate = function(username, password, cb) {
   }
 
   //get the access_token url
-  var requestUrl = this._prepareUrl(ENDPOINT.oauth.accessToken);
+  var requestUrl = this._prepareUrl(ENDPOINT.oauth.accessToken),
+      self = this;
 
-  //create the necessary OAuth parameters and signature for the request
-  var orderedParameters = this._oauthClient._prepareParameters(null, null, 'POST', requestUrl, {
-                                                                x_auth_username: username,
-                                                                x_auth_password: password,
-                                                                x_auth_mode: 'client_auth'
-                                                              });
+  this._oauthClient._performSecureRequest(null, null, 'POST', requestUrl, {
+    x_auth_mode: 'client_auth',
+    x_auth_password: password,
+    x_auth_username: username
+  }, null, null, function(err, data) {
+    if(err) return cb(err.data || err);
 
-  //turn the orderedParameters into a key:value object
-  var postBody = {};
-  for( var i= 0 ; i < orderedParameters.length; i++) {
-    postBody[orderedParameters[i][0]] = orderedParameters[i][1];
-  }
+    var data = querystring.parse(data);
 
-  //make the authentication request
-  //note: this is done using the "complete" event and the "err" and "data" variables to make testing
-  //      easier, normally you'd just do the callback in the "success" or "error" event handlers
-  var err = null, data = null, self = this;
-
-  this._restler.post(requestUrl, {
-    data: postBody
-  }).on('success', function(res) {
-    data = querystring.parse(res);
     self.accessToken = data.oauth_token;
     self.accessTokenSecret = data.oauth_token_secret;
-  }).on('error', function(res) {
-    err = res;
-  }).on('complete', function() {
-    return cb(err, data);
+
+    cb(null, data);
   });
 };
 

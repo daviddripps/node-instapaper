@@ -6,7 +6,7 @@
 
 module.exports = {
   '/oauth/access_token' : {
-    success: 'oauth_token=aabbccdd&oauth_token_secret=efgh1234',
+    success: 'oauth_token=testAccessToken&oauth_token_secret=testAccessTokenSecret',
     error: 'oauth_timestamp is too far away; we believe it is now 1341088595, ' +
                'you sent 0, 1341088595 seconds away.'
   },
