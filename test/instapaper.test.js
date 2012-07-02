@@ -426,7 +426,7 @@ suite('Instapaper', function() {
 
       /**
        * Integration tests:
-       *   Tests the getuser() method's integration with the _makeRequest() method
+       *   Tests the getUser() method's integration with the _makeRequest() method
        */
       suite('OAuth request', function() {
         setup(function() {
@@ -460,6 +460,21 @@ suite('Instapaper', function() {
 
       suite('OAuth response', function() {
         setup(setupTests);
+
+        test('should call _filterResponse with response from _oauthClient.get', function() {
+          var client = this.instapaperClient;
+          client._filterResponse = stubFn('intentional error to exit early');
+          client.getUser(function(err, res) {
+            client._filterResponse.executed.should.be.true;
+
+            should.not.exist(client._filterResponse.args[0]);
+
+            var successResponse = ApiResponse['/account/verify_credentials'].success;
+            client._filterResponse.args[1].should.equal(successResponse);
+
+            client._filterResponse.args[2].should.be.a('function');
+          });
+        });
 
         test('should respond with an error if unsuccessful', function() {
           var client = this.errorClient;
@@ -605,6 +620,17 @@ suite('Instapaper', function() {
           });
         });
 
+        test('should call _filterResponse with response from _oauthClient.post', function() {
+          var client = this.instapaperClient;
+          client._filterResponse = stubFn('intentional error to exit early');
+          client.addBookmark('testUrl', function(err, res) {
+            client._filterResponse.executed.should.be.true;
+            should.not.exist(client._filterResponse.args[0]);
+            client._filterResponse.args[1].should.equal(ApiResponse['/bookmarks/add'].success);
+            client._filterResponse.args[2].should.be.a('function');
+          });
+        });
+
         test('should have all the correct data in the response object on success', function() {
           var client = this.instapaperClient;
           client.addBookmark('testUrl', function(err, res) {
@@ -623,6 +649,138 @@ suite('Instapaper', function() {
           client.addBookmark('testUrl', function(err) {
             should.exist(err);
             err.should.equal('Not logged in');
+          });
+        });
+      });
+    });
+
+    /**
+     * Test the _filterResponse() method
+     */
+    suite('._filterResponse()', function() {
+      setup(setupTests);
+
+      test('should be a function', function() {
+        should.exist(this.instapaperClient._filterResponse);
+        this.instapaperClient._filterResponse.should.be.a('function');
+      });
+
+      test('should throw if no callback is provided', function() {
+        (function() {
+          this.instapaperClient._filterResponse(null, {});
+        }.bind(this)).should.throw('You must provide a callback.');
+      });
+
+      test('should call the callback if provided', function(done) {
+        this.instapaperClient._filterResponse(null, {}, function() {
+          should.ok(true);
+          done();
+        });
+      });
+
+      test('should respond with an object if first argument is null', function() {
+        this.instapaperClient._filterResponse(null, {}, function(err, res) {
+          should.not.exist(err);
+          should.exist(res);
+          res.should.be.a('object');
+        });
+      });
+
+      test('should forward error message if first argument exists', function() {
+        var error = {
+          statusCode: 403,
+          data: '[{"type":"error","error_code":403,"message":"testErrorMessage"}]'
+        };
+
+        this.errorClient._filterResponse(error, null, function(err) {
+          should.exist(err);
+          err.should.equal('testErrorMessage');
+        });
+      });
+
+      test('should respond with an error message if no response is provided', function() {
+        this.errorClient._filterResponse(null, null, function(err) {
+          should.exist(err);
+          err.should.equal('An error occurred.  Sorry for not being a helpful description.');
+        });
+      });
+
+      suite('response format', function() {
+        setup(function() {
+          setupTests.bind(this).call();
+
+          this.unfilteredResponse = [ {
+            "type":"bookmark",
+            "bookmark_id":299276832,
+            "url":"http:\/\/www.daviddripps.com",
+            "title":"David Dripps",
+            "description":"",
+            "time":1341205558,
+            "starred":"0",
+            "private_source":"",
+            "hash":"pNIo07VD",
+            "progress":0,
+            "progress_timestamp":0
+          }, {
+            "type":"error",
+            "error_code":403,
+            "message":"Not logged in"
+          }, {
+            type: 'user',
+            user_id: '12345678',
+            username: 'testUsernameFTW'
+          }, {
+            "type":"bookmark",
+            "bookmark_id":1234,
+            "url":"http:\/\/www.example.com\/page1.html",
+            "title":"Example page 1",
+            "description":"An example page."
+          }, {
+            "type":"bookmark",
+            "bookmark_id":1235,
+            "url":"http:\/\/www.example.com\/page2.html",
+            "title":"Example page 2",
+            "description":"Another example page."
+          } ];
+        });
+
+        test('should have keys of user, bookmark, folder, error, or meta only', function() {
+          this.instapaperClient._filterResponse(null, this.unfilteredResponse, function(err, res) {
+            should.not.exist(err);
+            res.should.be.a('object');
+
+            var hasWrongKey = false;
+
+            for(var i in res) {
+              if(['user', 'bookmark', 'folder', 'error', 'meta'].indexOf(i) == -1)
+                hasWrongKey = true;
+            }
+
+            hasWrongKey.should.be.false;
+          });
+        });
+
+        test('should have arrays for all returned keys', function() {
+          this.instapaperClient._filterResponse(null, this.unfilteredResponse, function(err, res) {
+            should.not.exist(err);
+            res.should.be.a('object');
+
+            for(var i in res) {
+              Array.isArray(res[i]).should.be.true;
+            }
+          });
+        });
+
+        test('should not have a "type" key in any of the returned objects', function() {
+          this.instapaperClient._filterResponse(null, this.unfilteredResponse, function(err, res) {
+            should.not.exist(err);
+            res.should.be.a('object');
+
+            for(var i in res) {
+              res[i].forEach(function(obj) {
+                should.not.exist(obj.type);
+              });
+            }
           });
         });
       });

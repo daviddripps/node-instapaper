@@ -166,6 +166,55 @@ Instapaper.prototype._makeRequest = function(url, data, cb) {
   });
 };
 
+Instapaper.prototype._filterResponse = function(err, res, cb) {
+  if(! cb) throw new TypeError('You must provide a callback.');
+
+  if(err || ! res) {
+    if(err && err.data) {
+      try {
+        err.data = JSON.parse(err.data);
+      } catch(ignore) {}
+
+      if(Array.isArray(err.data))
+        return cb(err.data[0].message);
+      else
+        return cb(err.data);
+    } else {
+      return cb(err || 'An error occurred.  Sorry for not being a helpful description.');
+    }
+  }
+
+  try {
+    res = JSON.parse(res);
+  } catch(ignore) {}
+
+  //organize the response data by the type so it's easy for the other methods to filter
+  var dataOrganizedByType = {};
+
+  for(var i = 0, l = res.length; i < l; i++) {
+    //get the type and remove it from the record
+    var recordType = new String(res[i].type);
+    var recordNoType = Object.create(Object.getPrototypeOf(res[i]));
+    var props = Object.getOwnPropertyNames(res[i]);
+    var pName;
+    //remove the type from the object
+    props.splice(props.indexOf('type'), 1);
+    for (var p in props) {
+      pName = props[p];
+      Object.defineProperty(recordNoType, pName, Object.getOwnPropertyDescriptor(res[i], pName));
+    };
+
+    //if there's no key for this type yet, create it
+    if(! dataOrganizedByType[recordType])
+      dataOrganizedByType[recordType] = [];
+
+    //set the record data, sans type, to the type key
+    dataOrganizedByType[recordType].push(recordNoType);
+  }
+
+  cb(null, dataOrganizedByType);
+};
+
 /**
  * Authenticates the username and password with the Instapaper API
  *
@@ -218,52 +267,65 @@ Instapaper.prototype.getUser = function(cb) {
   if(! this.accessToken || ! this.accessTokenSecret)
     return cb('No accessToken or accessTokenSecret provided.');
 
-  var verifyUrl = this._prepareUrl(ENDPOINT.account.verify);
+  var verifyUrl = this._prepareUrl(ENDPOINT.account.verify),
+      self = this;
 
   this._oauthClient.get(verifyUrl, this.accessToken, this.accessTokenSecret, function(err, res) {
-    if(err || ! res) {
-      if(err && err.data) {
-        try {
-          err.data = JSON.parse(err.data);
-        } catch(ignore) {}
+    self._filterResponse(err, res, function(err, filteredData) {
+      if(err) return cb(err);
 
-        if(Array.isArray(err.data))
-          return cb(err.data[0].message);
-        else
-          return cb(err.data);
-      } else {
-        return cb(err || 'An error occurred.  Sorry for not being a helpful description.');
-      }
-    }
-
-    //organize the response data by the type so it's easy for the other methods to filter
-    var dataOrganizedByType = {};
-
-    for(var i = 0, l = res.length; i < l; i++) {
-      //get the type and remove it from the record
-      var recordType = new String(res[i].type);
-      var recordNoType = Object.create(Object.getPrototypeOf(res[i]));
-      var props = Object.getOwnPropertyNames(res[i]);
-      var pName;
-      //remove the type from the object
-      props.splice(props.indexOf('type'), 1);
-      for (var p in props) {
-        pName = props[p];
-        Object.defineProperty(recordNoType, pName, Object.getOwnPropertyDescriptor(res[i], pName));
-      };
-
-      //if there's no key for this type yet, create it
-      if(! dataOrganizedByType[recordType])
-        dataOrganizedByType[recordType] = [];
-
-      //set the record data, sans type, to the type key
-      dataOrganizedByType[recordType].push(recordNoType);
-    }
-
-    return cb(null, dataOrganizedByType.user[0]);
+      return cb(null, filteredData.user[0]);
+    });
+//    if(err || ! res) {
+//      if(err && err.data) {
+//        try {
+//          err.data = JSON.parse(err.data);
+//        } catch(ignore) {}
+//
+//        if(Array.isArray(err.data))
+//          return cb(err.data[0].message);
+//        else
+//          return cb(err.data);
+//      } else {
+//        return cb(err || 'An error occurred.  Sorry for not being a helpful description.');
+//      }
+//    }
+//
+//    //organize the response data by the type so it's easy for the other methods to filter
+//    var dataOrganizedByType = {};
+//
+//    for(var i = 0, l = res.length; i < l; i++) {
+//      //get the type and remove it from the record
+//      var recordType = new String(res[i].type);
+//      var recordNoType = Object.create(Object.getPrototypeOf(res[i]));
+//      var props = Object.getOwnPropertyNames(res[i]);
+//      var pName;
+//      //remove the type from the object
+//      props.splice(props.indexOf('type'), 1);
+//      for (var p in props) {
+//        pName = props[p];
+//        Object.defineProperty(recordNoType, pName, Object.getOwnPropertyDescriptor(res[i], pName));
+//      };
+//
+//      //if there's no key for this type yet, create it
+//      if(! dataOrganizedByType[recordType])
+//        dataOrganizedByType[recordType] = [];
+//
+//      //set the record data, sans type, to the type key
+//      dataOrganizedByType[recordType].push(recordNoType);
+//    }
+//
+//    return cb(null, dataOrganizedByType.user[0]);
   });
 };
 
+/**
+ * adds a new bookmark to the authenticated user's Instapaper account
+ *
+ * @param {String} url - the URL of the page to bookmark
+ * @param {Object} options - valid keys: title, description, folder_id, resolve_final_url
+ * @param {Function} cb
+ */
 Instapaper.prototype.addBookmark = function(url, options, cb) {
   if(! url)
     throw new TypeError('You must provide a url to bookmark.');
@@ -279,50 +341,16 @@ Instapaper.prototype.addBookmark = function(url, options, cb) {
   if(! this.accessToken || ! this.accessTokenSecret)
     throw new TypeError('No access token or secret provided.');
 
-  var addUrl = this._prepareUrl(ENDPOINT.bookmarks.add);
+  var addUrl = this._prepareUrl(ENDPOINT.bookmarks.add),
+      self = this;
 
   this._oauthClient.post(addUrl, this.accessToken, this.accessTokenSecret, options,
   function(err, res) {
-    if(err || ! res) {
-      try {
-        err = JSON.parse(err);
-      } catch(ignore) {}
+    self._filterResponse(err, res, function(err, filteredData) {
+      if(err) return cb(err);
 
-      if(Array.isArray(err))
-        return cb(err[0].message);
-
-      return cb(err || 'An error occurred.  Sorry for not being a helpful description.');
-    }
-
-    try {
-      res = JSON.parse(res);
-    } catch(ignore) {}
-
-    //organize the response data by the type so it's easy for the other methods to filter
-    var dataOrganizedByType = {};
-
-    for(var i = 0, l = res.length; i < l; i++) {
-      //get the type and remove it from the record
-      var recordType = new String(res[i].type);
-      var recordNoType = Object.create(Object.getPrototypeOf(res[i]));
-      var props = Object.getOwnPropertyNames(res[i]);
-      var pName;
-      //remove the type from the object
-      props.splice(props.indexOf('type'), 1);
-      for (var p in props) {
-        pName = props[p];
-        Object.defineProperty(recordNoType, pName, Object.getOwnPropertyDescriptor(res[i], pName));
-      };
-
-      //if there's no key for this type yet, create it
-      if(! dataOrganizedByType[recordType])
-        dataOrganizedByType[recordType] = [];
-
-      //set the record data, sans type, to the type key
-      dataOrganizedByType[recordType].push(recordNoType);
-    }
-
-    cb(null, dataOrganizedByType.bookmark[0]);
+      return cb(null, filteredData.bookmark[0]);
+    });
   });
 };
 
